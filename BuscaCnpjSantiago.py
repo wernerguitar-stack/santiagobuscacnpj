@@ -243,7 +243,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Busca do caminho da logo com verificação de segurança
 diretorio_script = os.path.dirname(os.path.abspath(__file__))
 caminho_logo = os.path.join(diretorio_script, "logo.png")
 
@@ -309,67 +308,76 @@ if st.session_state['dados_cnpj'] is not None:
     telefone = st.text_input("Telefone de Contato:", value=telefone_padrao)
     email = st.text_input("E-mail de Contato:", value=email_padrao)
     
-    # Seleção do Processo / Funil
     processo_selecionado = st.selectbox("Selecione o Processo / Funil de Negócio:", list(FUNIS_NEGOCIO.keys()))
     category_id = FUNIS_NEGOCIO[processo_selecionado]
     
-    # Seleção de Consultor responsável
     consultor_selecionado = st.selectbox("Selecione o Consultor Responsável:", list(CONSULTORES.keys()))
     id_consultor = CONSULTORES[consultor_selecionado]
     
     st.write("---")
     st.caption("🎙️ **Observações (Digite ou grave por áudio):**")
     
-    # Gravação e transcrição por áudio no navegador com solicitação de áudio para Android/WebView
+    # Gravação e transcrição compatível com Mobile / Touch
     speech_component = """
     <div style="font-family: sans-serif; margin-bottom: 10px;">
-        <button id="recordBtn" style="
+        <button id="recordBtn" type="button" style="
             background-color: #ff4b4b; 
             color: white; 
             border: none; 
-            padding: 8px 16px; 
-            border-radius: 4px; 
+            padding: 10px 18px; 
+            border-radius: 6px; 
             cursor: pointer;
             font-weight: bold;
+            font-size: 15px;
+            width: 100%;
+            -webkit-tap-highlight-color: transparent;
         ">🎙️ Gravar por Áudio</button>
-        <span id="status" style="margin-left: 10px; font-size: 14px; color: gray;"></span>
+        <div id="status" style="margin-top: 8px; font-size: 14px; color: #555; text-align: center; font-weight: 500;"></div>
     </div>
     <script>
         const btn = document.getElementById('recordBtn');
         const status = document.getElementById('status');
         
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        
-        btn.onclick = async () => {
-            // Solicitação explícita de áudio para o Android WebView
-            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                try {
-                    await navigator.mediaDevices.getUserMedia({ audio: true });
-                } catch (err) {
-                    status.innerText = "Permissão de microfone negada no app.";
-                    return;
-                }
-            }
+        let recognition = null;
+        let isRecording = false;
 
-            if (!SpeechRecognition) {
-                status.innerText = "Navegador não suporta transcrição direta.";
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        async function initAndStart() {
+            if (isRecording) {
+                if (recognition) recognition.stop();
                 return;
             }
 
-            const recognition = new SpeechRecognition();
+            if (!SpeechRecognition) {
+                status.innerText = "Navegador não suporta transcrição de voz.";
+                return;
+            }
+
+            try {
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    await navigator.mediaDevices.getUserMedia({ audio: true });
+                }
+            } catch (err) {
+                status.innerText = "Acesso ao microfone foi negado.";
+                return;
+            }
+
+            recognition = new SpeechRecognition();
             recognition.lang = 'pt-BR';
             recognition.continuous = false;
             recognition.interimResults = false;
 
             recognition.onstart = () => {
-                status.innerText = "Ouvindo... Fale agora!";
+                isRecording = true;
+                status.innerText = "🔴 Ouvindo... Fale agora!";
+                btn.innerText = "⏹️ Parar Gravação";
                 btn.style.backgroundColor = "#28a745";
             };
 
             recognition.onresult = (event) => {
                 const text = event.results[0][0].transcript;
-                status.innerText = "Transcrito com sucesso!";
-                btn.style.backgroundColor = "#ff4b4b";
+                status.innerText = "✅ Transcrito com sucesso!";
                 
                 const textArea = window.parent.document.querySelector('textarea[aria-label="Observações:"]');
                 if (textArea) {
@@ -380,23 +388,40 @@ if st.session_state['dados_cnpj'] is not None:
             };
 
             recognition.onerror = (event) => {
-                status.innerText = "Erro: " + event.error;
-                btn.style.backgroundColor = "#ff4b4b";
+                if (event.error === 'no-speech') {
+                    status.innerText = "Nenhuma fala foi detectada. Tente novamente.";
+                } else {
+                    status.innerText = "Erro ao capturar voz: " + event.error;
+                }
+                resetButton();
             };
 
             recognition.onend = () => {
-                btn.style.backgroundColor = "#ff4b4b";
+                resetButton();
             };
 
             try {
                 recognition.start();
             } catch (e) {
-                status.innerText = "Erro ao iniciar gravação.";
+                status.innerText = "Erro ao iniciar escuta: " + e.message;
+                resetButton();
             }
-        };
+        }
+
+        function resetButton() {
+            isRecording = false;
+            btn.innerText = "🎙️ Gravar por Áudio";
+            btn.style.backgroundColor = "#ff4b4b";
+        }
+
+        btn.addEventListener('click', initAndStart);
+        btn.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            initAndStart();
+        }, { passive: false });
     </script>
     """
-    components.html(speech_component, height=50)
+    components.html(speech_component, height=75)
     
     observacoes_input = st.text_area("Observações:", value="", placeholder="Digite observações adicionais ou use o botão de áudio acima...")
     
