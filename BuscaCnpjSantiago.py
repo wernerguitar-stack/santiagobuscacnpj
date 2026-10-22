@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import requests
 import re
+import os
 
 # ==========================================
 # CONFIGURAÇÃO DO BITRIX24 - SANTIAGO SAÚDE
@@ -34,8 +35,8 @@ CONSULTORES = {
 
 # Mapeamento dos Processos / Funis (Nome -> CATEGORY_ID)
 FUNIS_NEGOCIO = {
-    "SDR Negócios": 0,        # Funil Padrão (Default)
-    "Contratos Negócios": 1   # ID da Categoria do Funil de Contratos
+    "SDR Negócios": 0,        # Funil Padrão
+    "Contratos Negócios": 1   # ID do Funil de Contratos
 }
 
 def limpar_cnpj(cnpj_raw):
@@ -242,14 +243,17 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# Busca do caminho da logo com verificação de segurança
+diretorio_script = os.path.dirname(os.path.abspath(__file__))
+caminho_logo = os.path.join(diretorio_script, "logo.png")
+
 col_esq, col_centro, col_dir = st.columns([1, 2, 1])
 
-
 with col_centro:
-    # Carrega a logo a partir do arquivo salvo na mesma pasta do projeto
-    st.image("logo.png", use_container_width=True)
-
-
+    if os.path.exists(caminho_logo):
+        st.image(caminho_logo, use_container_width=True)
+    else:
+        st.markdown("<h2 style='text-align: center; color: #008080;'>Santiago Saúde</h2>", unsafe_allow_html=True)
 
 st.markdown("<h3 style='text-align: center; margin-top: -10px;'>Crie novos leads no Bitrix24</h3>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: gray;'>Santiago Saúde e Segurança Ocupacional</p>", unsafe_allow_html=True)
@@ -258,9 +262,6 @@ st.write("---")
 
 if 'dados_cnpj' not in st.session_state:
     st.session_state['dados_cnpj'] = None
-
-if 'obs_text' not in st.session_state:
-    st.session_state['obs_text'] = ""
 
 cnpj_input = st.text_input("Digite o CNPJ da empresa (com ou sem pontuação):", placeholder="00.000.000/0000-00")
 
@@ -308,18 +309,18 @@ if st.session_state['dados_cnpj'] is not None:
     telefone = st.text_input("Telefone de Contato:", value=telefone_padrao)
     email = st.text_input("E-mail de Contato:", value=email_padrao)
     
-    # 📌 Seleção do Processo / Funil
+    # Seleção do Processo / Funil
     processo_selecionado = st.selectbox("Selecione o Processo / Funil de Negócio:", list(FUNIS_NEGOCIO.keys()))
     category_id = FUNIS_NEGOCIO[processo_selecionado]
     
-    # 📌 Seleção de Consultor responsável
+    # Seleção de Consultor responsável
     consultor_selecionado = st.selectbox("Selecione o Consultor Responsável:", list(CONSULTORES.keys()))
     id_consultor = CONSULTORES[consultor_selecionado]
     
     st.write("---")
     st.caption("🎙️ **Observações (Digite ou grave por áudio):**")
     
-    # Componente de gravação de áudio e transcrição via navegador
+    # Gravação e transcrição por áudio no navegador com solicitação de áudio para Android/WebView
     speech_component = """
     <div style="font-family: sans-serif; margin-bottom: 10px;">
         <button id="recordBtn" style="
@@ -338,22 +339,31 @@ if st.session_state['dados_cnpj'] is not None:
         const status = document.getElementById('status');
         
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
+        
+        btn.onclick = async () => {
+            // Solicitação explícita de áudio para o Android WebView
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                try {
+                    await navigator.mediaDevices.getUserMedia({ audio: true });
+                } catch (err) {
+                    status.innerText = "Permissão de microfone negada no app.";
+                    return;
+                }
+            }
+
+            if (!SpeechRecognition) {
+                status.innerText = "Navegador não suporta transcrição direta.";
+                return;
+            }
+
             const recognition = new SpeechRecognition();
             recognition.lang = 'pt-BR';
             recognition.continuous = false;
             recognition.interimResults = false;
 
-            btn.onclick = () => {
-                try {
-                    recognition.start();
-                    status.innerText = "Ouvindo... Fale agora!";
-                    btn.style.backgroundColor = "#28a745";
-                } catch (e) {
-                    recognition.stop();
-                    status.innerText = "";
-                    btn.style.backgroundColor = "#ff4b4b";
-                }
+            recognition.onstart = () => {
+                status.innerText = "Ouvindo... Fale agora!";
+                btn.style.backgroundColor = "#28a745";
             };
 
             recognition.onresult = (event) => {
@@ -361,7 +371,6 @@ if st.session_state['dados_cnpj'] is not None:
                 status.innerText = "Transcrito com sucesso!";
                 btn.style.backgroundColor = "#ff4b4b";
                 
-                // Envia o texto gravado de volta para o input
                 const textArea = window.parent.document.querySelector('textarea[aria-label="Observações:"]');
                 if (textArea) {
                     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
@@ -371,16 +380,20 @@ if st.session_state['dados_cnpj'] is not None:
             };
 
             recognition.onerror = (event) => {
-                status.innerText = "Erro no áudio: " + event.error;
+                status.innerText = "Erro: " + event.error;
                 btn.style.backgroundColor = "#ff4b4b";
             };
 
             recognition.onend = () => {
                 btn.style.backgroundColor = "#ff4b4b";
             };
-        } else {
-            status.innerText = "Navegador não suporta transcrição direta.";
-        }
+
+            try {
+                recognition.start();
+            } catch (e) {
+                status.innerText = "Erro ao iniciar gravação.";
+            }
+        };
     </script>
     """
     components.html(speech_component, height=50)
@@ -396,13 +409,8 @@ if st.session_state['dados_cnpj'] is not None:
         dados['observacoes_editadas'] = observacoes_input
         
         with st.spinner("Cadastrando Empresa, Contato e Negócio na Santiago Saúde..."):
-            # 1. Cria a Empresa
             company_id, erro_empresa = criar_empresa_bitrix(dados, id_consultor)
-            
-            # 2. Cria o Contato vinculado à Empresa
             contact_id, erro_contato = criar_contato_bitrix(dados, id_consultor, company_id=company_id)
-            
-            # 3. Cria o Negócio no Funil escolhido vinculado à Empresa e Contato
             deal_id, erro_bitrix = criar_negocio_bitrix(
                 dados, 
                 category_id, 
